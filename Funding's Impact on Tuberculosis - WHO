@@ -1,0 +1,147 @@
+### Data Resources: World Health Organization(2020). https://www.who.int/tb/country/data/download/en/
+### This is the RMD version of R script
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+library(ggplot2)
+library(ggm)
+```
+
+## Input data
+
+```{r, echo=FALSE}
+library(readxl)
+TB_budget_with_definition <- read_excel("~/Desktop/Ass 2/TB_budget with definition.xlsx", sheet = "TB_budget_2020-02-26", skip = 1)
+budget_data <- TB_budget_with_definition
+TB_age_sex_country <- read_excel("~/Desktop/Ass 2/TB_age,sex,country.xlsx", sheet = "TB_countries", skip = 1)
+country_data <- TB_age_sex_country
+#str(budget_data)
+#str(country_data)
+```
+
+## Data processing (missing data and some other things)
+
+```{r, echo=FALSE}
+# Must assign value to NA before adding them up, otherwise there can be an error 
+# (eg. d=a+b+c, if a or b or c is NA, then for whatever other values are, d will be NA)
+budget_data[is.na(budget_data)]<-0
+country_data[is.na(country_data)]<-0
+budget <- budget_data %>% 
+  mutate(total_patient=tx_dstb+tx_mdr+tx_xdr,
+         total_budget=budget_cpp_dstb+budget_cpp_mdr+budget_cpp_xdr) %>%
+  select(country, year, tx_dstb, tx_mdr, tx_xdr, budget_cpp_dstb, budget_cpp_mdr, budget_cpp_xdr, total_patient, total_budget)
+countries <- country_data %>%
+  select(country,year,pop=e_pop_num,case_incidence=e_inc_100k,mortality=e_mort_exc_tbhiv_100k)
+data <- left_join(budget,countries,by=c('country','year') )%>%
+              filter(year==2018)
+# We only keep the meaningful data that at least total_patient or total_budget is not 0
+final_data <- data %>% filter(total_patient!=0 | total_budget!=0)
+# Actually we can see that after filtering, only the case 'budget=0, patient!=0' occurs, the case 'budget!=0, patient=0' does not occur
+final_data
+
+boxplot(final_data$total_patient, main="Boxplot - number of total patient expected to start the treatments")
+boxplot(final_data$total_budget, main="Boxplot - budget available for the treatments")
+
+```
+
+## Outliers of total_budget
+```{r, echo=FALSE}
+ggplot(final_data, aes(x=seq(total_budget),y=total_budget))+geom_point()
+final_data %>% arrange(desc(total_budget))
+summary(final_data$total_budget)
+# After visualization and see the data summary, 'Marshall Islands' has extremely high value, which could be record error or unit dismatch, we eliminate this row. For other outliers above the Q3+1.5IQR, we use the highest value within the non-outlier range to add markup on outliers
+outlier_above<-10844+1.5*(10844-1468)
+#outlier_below<-1468-1.5*(10844-1468)  (the minimum budget is 0, we keep these samll values as they are instead of modifying them, since they do not have a big effect on the test)
+final_data %>% filter(total_budget>outlier_above)
+sorted_data<-final_data %>% arrange(desc(total_budget)) %>% filter(country != 'Marshall Islands')
+df<-data.frame(sorted_data)
+for (i in seq(1,10,by=1)) {df[i,10]=20578+1*(11-i)}
+df<-df[order(df$country),]
+ggplot(df, aes(x=seq(total_budget),y=total_budget))+geom_point()
+```
+
+## Outliers of total_patient
+```{r, echo=FALSE}
+# number of patients to some degree reflects the population of a country, by taking log on them, we can compress the data into a smaller range, often leading to a higher performance. Also, since we've checked that there is no 0 value in total_patient in the cleaned dataset, we can directly log them
+ggplot(final_data, aes(x=seq(total_patient),y=total_patient))+geom_point()
+df %>% arrange(desc(total_patient)) %>% select(country,total_patient,total_budget)
+df[,9]<-log(df[,9])
+df %>% arrange(desc(total_patient)) %>% select(country,total_patient,total_budget)
+ggplot(df, aes(x=seq(total_patient),y=total_patient))+geom_point()
+summary(df$total_patient)
+#outlier_above_2<-10.398+1.5*(10.398-7.988) #threshold:14.013 (only India 14.907221 is the outlier, but the difference with threshold is small, we leave it as it is)
+```
+
+## Correlation test
+```{r, echo=FALSE}
+cor(df$total_budget,df$total_patient)
+cor.test(df$total_budget,df$total_patient)
+
+# correlation graph
+df %>% ggplot(aes(x=total_budget,y=total_patient))+geom_point()+geom_smooth(method="lm")
+```
+
+## Bootstrapping
+```{r, echo=FALSE}
+bootTau<-function(df,i) cor(df$total_budget[i], df$total_patient[i], use = "complete.obs", method = "pearson")
+boot_pearson<-boot(df, bootTau, 2000)
+boot_pearson
+
+boot.ci(boot_pearson)
+```
+
+
+## Partial correlation test
+```{r, echo=FALSE}
+# Similarly, we use the same method in 'total_budget' to deal with 'mortality' outliers
+ggplot(df, aes(x=seq(mortality),y=mortality))+geom_point()
+df %>% arrange(desc(mortality)) %>% select(country,total_patient,total_budget,mortality)
+summary(df$mortality)
+df<-df[order(df$mortality,decreasing = TRUE),]
+outlier_above_2<-28.5+1.5*(28.5-2.9) #threshod:67
+rownames(df) <- 1:nrow(df)
+for (i in seq(1,6,by=1)) {df[i,13]=67+1*(7-i)}
+df<-df[order(df$country),]
+ggplot(df, aes(x=seq(mortality),y=mortality))+geom_point()
+
+# check for normality
+df[,10]<-sqrt(df[,10])
+df[,13]<-log(df[,13]+1)
+
+df %>% 
+  ggplot(aes(x=total_budget)) + theme(legend.position = "none") +
+    geom_histogram(aes(y=..density..)) + 
+    stat_function(fun=dnorm, args=list(mean=mean(df$total_budget, na.rm=TRUE), sd=sd(df$total_budget, na.rm=TRUE)))
+df %>% 
+  ggplot(aes(sample=total_budget)) + stat_qq() + geom_qq_line(aes(color="red")) + theme(legend.position = "none")
+df %>% 
+  ggplot(aes(x=total_patient)) + theme(legend.position = "none") +
+    geom_histogram(aes(y=..density..)) + 
+    stat_function(fun=dnorm, args=list(mean=mean(df$total_patient, na.rm=TRUE), sd=sd(df$total_patient, na.rm=TRUE)))
+df %>% 
+  ggplot(aes(sample=total_patient)) + stat_qq() + geom_qq_line(aes(color="red")) + theme(legend.position = "none")
+df %>% 
+  ggplot(aes(x=mortality)) + theme(legend.position = "none") +
+    geom_histogram(aes(y=..density..)) + 
+    stat_function(fun=dnorm, args=list(mean=mean(df$mortality, na.rm=TRUE), sd=sd(df$mortality, na.rm=TRUE)))
+df %>% 
+  ggplot(aes(sample=mortality)) + stat_qq() + geom_qq_line(aes(color="red")) + theme(legend.position = "none")
+
+# Some other correlations
+cor(df$total_budget,df$mortality)
+cor.test(df$total_budget,df$mortality)
+cor(df$mortality,df$total_patient)
+cor.test(df$mortality,df$total_patient)
+
+# Partial correlation
+df_2 <- df %>% 
+  select("total_budget", "total_patient", "mortality")
+pcor(c("total_budget", "total_patient", "mortality"), var(df_2))
+pc <- pcor(c("total_budget", "total_patient", "mortality"), var(df_2))
+pcor.test(pc, 1, 115)
+```
+
+### This is the #2 assignment of MSCI 718 at University of Waterloo
+### Co-authors: Yuchen Wang, Eric Zhang, Mandy Chen
