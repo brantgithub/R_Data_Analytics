@@ -1,0 +1,238 @@
+### Data Resources: http://archive.ics.uci.edu/ml/datasets/Wine
+### This is the RMD version of Rscript
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.height=3, fig.width=8)
+install.packages("devtools")
+library(tidyverse)
+library(knitr)    # For knitting document and include_graphics function
+library(gridExtra) # For including grids of plots
+library(psych)
+library(ggiraph)
+library(ggiraphExtra)
+library(car)
+library(GGally) #for ggpairs
+library(readr)
+```
+
+#1.import data
+```{r echo = FALSE}
+white <- read.csv("~/Downloads/winequality-white.csv", header = TRUE, sep=";")
+red <- read.csv("~/Downloads/winequality-red.csv", header = TRUE, sep=";")
+wine <- rbind(whitewine,redwine)
+red$`color`="Red" #Creating a new column
+white$`color`="White" #Creating a new column
+wine<-rbind(red, white) #Merging two data frames
+wine$color<-as.factor(wine$color) #converting Type into factor
+```
+##Overview
+In this report, we downloaded two datasets related to red and white wine from UCI Machine Learning Repository. We merged those datasets into one. We want to build a logistic regression model to predict the color of wine (outcome variable) from fixed acidity, volatile acidity, residual sugar, free sulfur dioxide, and total sulfur dioxide (predictor variables).
+
+##Data Description
+Our data frame has 6497 observations, 11 input variables based on physicochemical tests: fixed acidity, volatile acidity, citric acid, residual sugar, chlorides, free sulfur dioxide, total sulfur dioxide, density, pH, sulphates, alcohol, which are all numberical data, and 1 output variable based on sensory data: quality, which is ordinal data (score between 0 and 10).
+```{r}
+str(wine)
+```
+
+#2. Checking missing values
+```{r}
+any(is.na(wine))
+```
+After importing data, we checked the missing values immediately and found out that we do not have any missing values which need to be modified.
+
+#3. Looking at data
+```{r}
+ggpairs(wine)
+```
+
+
+
+#STEP2.Plan-------------------
+
+#1. Checking variables
+
+```{r}
+levels(wine$color) 
+```
+We want to predict the color of wine (red or white). Our outcome variable is a binary variable, thus we will use logistic regression for this report.
+
+#2. Selecting predictor variables
+
+#In last report, we made a multiple linear regression by using some variables to predict quality. Now that quailty is based on many of other variables, if we involve quality as a predictor for color, other vairables will be redundant. Besdides, as a common knowledge, people tend to judge quality based on color of wine, instead of detecting color by quality.So we dropped off "Quality" as a useless variable. 
+
+#Then We used Hierachical method to select variables.we first put in all predictors that have an a priori reason to be there. Then, we add other possible predictors to the base model.
+
+#our priori reason here is we chose the variables which have relationship between color. Because if there is no relationship, there is no causation, then it is not a possible predictor.
+
+#Now we graphed each pair of other variables with Color.
+
+```{r}
+ggplot(wine, aes(y=color, x=fixed.acidity)) + geom_jitter(width=0.1, height=0.25) 
+ggplot(wine, aes(y=color, x=volatile.acidity)) + geom_jitter(width=0.1, height=0.25) 
+ggplot(wine, aes(y=color, x=citric.acid)) + geom_jitter(width=0.1, height=0.25) 
+ggplot(wine, aes(y=color, x=residual.sugar)) + geom_jitter(width=0.1, height=0.25) 
+ggplot(wine, aes(y=color, x=chlorides)) + geom_jitter(width=0.1, height=0.25) 
+ggplot(wine, aes(y=color, x=free.sulfur.dioxide)) + geom_jitter(width=0.1, height=0.25) 
+ggplot(wine, aes(y=color, x=total.sulfur.dioxide)) + geom_jitter(width=0.1, height=0.25) 
+ggplot(wine, aes(y=color, x=density)) + geom_jitter(width=0.1, height=0.25) 
+ggplot(wine, aes(y=color, x=pH)) + geom_jitter(width=0.1, height=0.25) 
+ggplot(wine, aes(y=color, x=sulphates)) + geom_jitter(width=0.1, height=0.25) 
+```
+
+
+#We can see from graphs that there is difference of fixed.acidity, volatile.acidity, residual.sugar, free.sulfur.dioxide, total.sulfur.dioxide among different colors.
+
+#We tested correlation between these possible variables and color.
+
+```{r}
+a <- wine %>% filter(color=="Red") %>% mutate(color_bin=1)
+b <- wine %>% filter(color=="White") %>% mutate(color_bin=0)
+wine <- rbind(a,b)
+
+cor.test(wine$fixed.acidity, wine$color_bin, method = "kendall")
+cor.test(wine$volatile.acidity, wine$color_bin, method = "kendall")
+cor.test(wine$residual.sugar, wine$color_bin, method = "kendall")
+cor.test(wine$free.sulfur.dioxide, wine$color_bin, method = "kendall")
+cor.test(wine$total.sulfur.dioxide, wine$color_bin, method = "kendall")
+```
+#the correlations of these 5 variables with color are all significant.
+
+#3. build base model
+
+```{r}
+model.1 <- glm(color ~ fixed.acidity + volatile.acidity + residual.sugar + free.sulfur.dioxide + total.sulfur.dioxide, data=wine, family=binomial())
+summary(model.1)
+```
+Our model is: 
+model.1 <- glm(color ~ fixed.acidity + volatile.acidity + residual.sugar + free.sulfur.dioxide + total.sulfur.dioxide, data=wine, family=binomial())
+
+We build this model to predict the color of wine. Our hyphothesis is that fixed acidity, volatile acidity, residual sugar, free sulfur dioxide, and total sulfur dioxide all have siginificant influence on the color of wine. 
+
+#STEP3. Test -----------------------------
+
+#3.1 Checking assumptions
+
+#3.1.1 Multicollinearity
+```{r}
+vif(model.1)
+1/vif(model.1)
+mean(vif(model.1))
+```
+#We inspected the VIF (Variance Inflation Factor) to investigate multicollinearity. The largest VIF was 1.913579, less than 10; the average vif was 1.413894, close to 1. The lowest tolerance (1/VIF) was 0.5225811, greater than 0.1 (which would indicate a serious problem) and 0.2 (which indicates a poential problem). We thus conclude that there is no collinearity in our data.
+
+#3.1.2 Linearity of the logit
+
+We created interaction terms of each of the continuous predictor variables with its log.
+```{r}
+wine$logFAint <- log(wine$fixed.acidity)*wine$fixed.acidity
+wine$logVAint <- log(wine$volatile.acidity)*wine$volatile.acidity
+wine$logRSint <- log(wine$residual.sugar)*wine$residual.sugar
+wine$logFSDint <- log(wine$free.sulfur.dioxide)*wine$free.sulfur.dioxide
+wine$logTSDint <- log(wine$total.sulfur.dioxide)*wine$total.sulfur.dioxide
+```
+Then, we generate a regression model involving the new created interaction variables.
+```{r}
+model.1.test.1 <- glm(color ~ fixed.acidity + volatile.acidity + residual.sugar + free.sulfur.dioxide + total.sulfur.dioxide
+                      + logFAint + logVAint + logRSint + logFSDint + logTSDint
+                      , data=wine, family=binomial() , na.action=na.omit)
+summary(model.1.test.1)
+```
+
+#3.1.3 independence of errors
+
+# D-W test
+```{r echo=FALSE}
+durbinWatsonTest(model.1)
+```
+#The Durbin-Watson test (in Appendix F) for independent errors was significant at the 5% level of significance (d = 1.31, p-value = 0). Since d is not close to 2 and p<0.05, there is some evidence of autocorrelation, but currently we can tolerate it since this model has nothing to do with time series.
+
+#3.4 Outliers and Influential Cases
+```{r echo=FALSE}
+wine2 <- wine
+wine2$fitted <- model.1$fitted
+wine2$residuals <-model.1$residuals
+wine2$standardized.residuals <- rstandard(model.1)
+possible.outliers <- subset(wine2, standardized.residuals < -1.96 | standardized.residuals > 1.96)
+possible.outliers
+count(possible.outliers)
+count(possible.outliers)/count(wine2)
+```
+We found 74 residuals are above or below 1.96 standard deviations. As this represents only 1.14% of the observations, expected if the residuals are normal (5% of data is expected to be outside of 2 standard deviations), we do not consider any of these observations as outliers and continued with all 6497 observations included in the model.
+```{r echo=FALSE}
+wine2$cooks <- cooks.distance(model.1)
+plot(sort(wine2$cooks, decreasing=TRUE))
+max(wine2$cooks)
+```
+To investigate influential cases, we calculated Cook's Distance on the developed model. Cook's distance was a maximum of 0.0635, far below the chosen cutoff value of 1. We thus conclude that there are no influential cases.
+
+#3.2.1 incomplete information
+
+Since all our predictor variables are continuous variables, there is no problem of incomplete information
+
+#3.2.2 Complete Separation
+#Based on the plots of Color vs predictor variables
+#Data overlapping exist, this is not a problem.
+
+
+#STEP4. Conclude -----------------------------
+
+#4.1 Interpreting the model
+```{r echo = FALSE}
+summary(model.1)
+```
+#Model coefficient
+Our model predicts color of wine from 5 variables (fixed acidity, volatile acidity, residual sugar, free sulfur dioxide, and total sulfur dioxide). We take a look at the overall fit of our model by comparing null deviance and residual deviance. Since residual deviance of 1265.5 is much less than 7251, we know that our model is more accurate when we add our predictor variables. 
+
+We can replace b-values with coefficient values shown in the table above. Now, we have a complete model:
+wine color = 8.86 + (-1.03 x fixed acidity) + (-14 x volatile acidity) + (0.24 x residual sugar) + (-0.06 x free sulfur dioxide) + (0.07 x total sulfur dioxide)
+
+Coefficient value that is less than 1 tells us that the predictor variable has negative relationship with the outcome variable. Conversely, predictor varible with a positive coefficient has a positive relationship with the outcome variable. For example, as fixed acidity increases by one unit, the chance that the wine color is white decreases. 
+
+All p-values are less than 0.05, which indicate all predictor variables can significantly predict the color of wine at the 5% significance level. 
+
+#Odds Ratio
+```{r echo=FALSE}
+exp(model.1$coefficients)
+```
+We calcualte odds ratio to find out how change in predictor would affect the change in odds of outcome. From the results above, we see that fixed acidity, volatile acidity, and free sulfur dioxide all have value that is less than 1, which indicates that, when those variables increase, the odds of white wine decrease. On the contrary, as residual sugar and total sulfur dioxide increase, the odds of white wine increase because those variables have value that is greater than 1. 
+
+#Confidence interval
+```{r echo=FALSE}
+exp(confint(model.1))
+```
+We also calculate confidence interval to interpret the coefficient for all predictor variables' odds ratio at the significance level of 5%. When we look at the lower and upper boundaries of confidence interval, we find that residual suagr and total sulfur dioxide both have interval that is above 1. This indicates that as those two varibles increase, white wine is more likely to be produced at the 5% significance level. The rest of predictor variables all have interval that is below then 1, which proves that, when those variables increase, the odds of white wine decrease. 
+
+
+#4.2 Assessing the model
+
+#R^2 Method
+```{r}
+modelChi<-model.1$null.deviance - model.1$deviance
+chidf <- model.1$df.null - model.1$df.residual
+chisq.prob <- 1 - pchisq(modelChi, chidf)
+R2.hl<-modelChi/model.1$null.deviance
+R2.hl
+R.cs <- 1 - exp ((model.1$deviance - model.1$null.deviance) /6496)
+R.cs
+R.n <- R.cs /(1-(exp(-(model.1$null.deviance/6496))))
+R.n
+```
+Since after using different 3 types of R^2 calculation, the results we obtained are all positive number. We can state that when the predictor variable increases, the likelihood of outcome varible occuring will increase.
+
+#AIC Method
+Assumed that there is other variable such as quality that may cause effect on wine color. We added quality as a predictor variable to see the new model.
+```{r}
+model.2 <- glm(color ~ fixed.acidity + volatile.acidity + residual.sugar + free.sulfur.dioxide + total.sulfur.dioxide+quality, data=wine, family=binomial())
+summary(model.2)
+```
+In this model, we found out that model2's AIC(1278.9) is higher than model1's(1277.5) which means that model 1 is a better model, we should not include quality as one of predictor variable.
+
+#Z-statistic method
+```{r}
+summary(model.1)
+```
+Since each of the coefficient is significantly different from 0, we conclude that the predictor variables are making significant contribution to the outcome (Y).
+
+
+### This is final project of MSCI 718 at Univrsity of Waterloo
+### Co-authors: Jiachen Lou, Shuo Liu, Yuchen Wang
