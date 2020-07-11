@@ -1,0 +1,120 @@
+### Data Resources: http://archive.ics.uci.edu/ml/datasets/Wine
+### This is the PMD version of Rscript
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(tidyverse)
+library(knitr)
+library(dplyr)
+library(ggplot2)
+library(ggm)
+library(gridExtra) # For including grids of plots
+library(psych)
+library(ggiraph)
+library(ggiraphExtra)
+library(GGally) #for ggpairs
+library(car)
+library(PerformanceAnalytics) # for correlation matrix plot
+```
+
+## Input data & Merge dataset
+
+```{r, echo=FALSE}
+red<-read.csv("~/Downloads/winequality-red.csv",head=TRUE,sep=";")
+white<-read.csv("~/Downloads/winequality-white.csv",head=TRUE,sep=";")
+red$`Type`="Red" #Creating a new column
+white$`Type`="White" #Creating a new column
+wine<-rbind(red, white) #Merging two data frames
+wine$Type<-as.factor(wine$Type) #converting Type into factor
+
+```
+
+## Initial analysis
+
+```{r, echo=FALSE}
+str(wine)
+any(is.na(wine)) # no missing value
+ggpairs(wine) # no apparent outliers (the plot is too messy, could put separate plots in appendix)
+
+```
+
+## Regression
+```{r, echo=FALSE}
+model.1 <- lm(formula = quality ~ fixed.acidity + volatile.acidity + citric.acid + residual.sugar + chlorides + free.sulfur.dioxide + total.sulfur.dioxide + density + pH + sulphates + alcohol, data = wine)
+summary(model.1)
+model.2 <- lm(formula = quality ~ fixed.acidity + volatile.acidity + residual.sugar + chlorides + free.sulfur.dioxide + total.sulfur.dioxide + density + pH + sulphates + alcohol, data = wine)
+summary(model.2) # delete the most insignificant citric.acid
+model.3 <- lm(formula = quality ~ fixed.acidity + volatile.acidity + residual.sugar + free.sulfur.dioxide + total.sulfur.dioxide + density + pH + sulphates + alcohol, data = wine) # delete the most insignificant chlorides
+summary(model.3) # the predictors are all significant, then we need to check whether there is multicollinearity
+```
+
+## Multicollinearity
+```{r, echo=FALSE}
+vif(model.3)
+1/vif(model.3)
+mean(vif(model.3))
+# there is multicollinearity
+```
+
+## Deal with multicollnearity
+```{r, echo=FALSE}
+# delete 'density' and create the new model
+model.4 <- lm(formula = quality ~ fixed.acidity + volatile.acidity + residual.sugar + free.sulfur.dioxide + total.sulfur.dioxide + pH + sulphates + alcohol, data = wine) 
+summary(model.4)# fixed.acidity insignificant
+model.5 <- lm(formula = quality ~ volatile.acidity + residual.sugar + free.sulfur.dioxide + total.sulfur.dioxide + pH + sulphates + alcohol, data = wine)
+summary(model.5)
+vif(model.5)
+1/vif(model.5)
+mean(vif(model.5)) # now the problem of multicollinearity has been solved, and all the predictors are significant
+```
+
+## Check other assumptions
+```{r, echo=FALSE}
+plot(model.5) # homoscedascity and normality checked
+durbinWatsonTest(model.5) # some evidence of autocorrelation, but we can tolerate it since this model has nothing to do with time series (i cannot think of any other ways to fix it. maybe include it in the follow-up study to find a better model)
+```
+
+## Outliers and influential points
+```{r, echo=FALSE}
+wine$fitted <- model.5$fitted
+wine$residuals <- model.5$residuals
+wine$standardized.residuals <- rstandard(model.5)
+possible.outliers <- subset(wine, standardized.residuals < -1.96 | standardized.residuals > 1.96)
+count(possible.outliers) #371, possible outlier ratio:371/6497=0.0571 - match the normality (5% of data falls beyond the [mean-2sd, mean+2sd] range) - we consider the model having no apparent outliers
+
+wine$cooks <- cooks.distance(model.5)
+plot(sort(wine$cooks, decreasing=TRUE))
+max(wine$cooks) #0.1669<1, no concern
+```
+
+## Summary and intepretation of the model
+```{r, echo=FALSE}
+summary(model.5)
+confint(model.5)
+plot(model.5)
+
+#normalize coefficients to compare the effects
+library(QuantPsyc)
+coef_lmbeta <- lm.beta(model.5)
+coef_lmbeta
+```
+
+## Prediction
+```{r, echo=FALSE}
+new.volatile.acidity=1
+new.residual.sugar=2
+new.free.sulfur.dioxide=3
+new.total.sulfur.dioxide=4
+new.pH=5
+new.sulphates=6
+new.alcohol=7
+new.wine <- data.frame(
+  volatile.acidity=new.volatile.acidity, residual.sugar=new.residual.sugar, free.sulfur.dioxide=new.free.sulfur.dioxide, total.sulfur.dioxide=new.total.sulfur.dioxide,
+  pH=new.pH, sulphates=new.sulphates, alcohol=new.alcohol)
+predict(model.5, newdata = new.wine)
+```
+
+### This is the #3 assignment of MSCI 718 at University of Waterloo
+### Co-authors: Yuchen Wang, Eric Zhang, Mandy Chen
